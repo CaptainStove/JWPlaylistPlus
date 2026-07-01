@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>jwplaylist — compress/decompress playlist</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 20px; max-width: 1000px; }
+    h1 { margin: 0 0 8px 0; }
+    p { margin-top: 0.2rem; color: #444; }
+    .box { display: flex; gap: 8px; margin-top: 12px; }
+    textarea { width: 100%; min-height: 240px; font-family: monospace; font-size: 13px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; resize: vertical; }
+    .controls { display:flex; gap:8px; margin-top:8px; }
+    button { padding: 8px 12px; border-radius:6px; border:1px solid #bbb; background: #f6f6f6; cursor:pointer; }
+    button.primary { background: #0366d6; color: white; border-color: #0356b6; }
+    .muted { color:#666; font-size:13px; }
+    .small { font-size:13px; color:#666; margin-top:6px; }
+    .row { margin-top:18px; }
+    label { display:block; font-weight:600; margin-bottom:6px; }
+    .topline { display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .example { background:#fafafa; border:1px dashed #eee; padding:10px; border-radius:6px; color:#444; font-size:13px; }
+    .error { color: #a00; font-weight:600; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <h1>jwplaylist</h1>
+  <div class="topline">
+    <div>
+      <p class="muted">Decompresses a compressed URL parameter and displays a playlist you can edit. Compress to update the compressed text and the URL.</p>
+    </div>
+    <div>
+      <button id="copyUrl">Copy URL</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <label for="playlist">Playlist (editable)</label>
+    <textarea id="playlist" spellcheck="false" placeholder="Paste or edit your playlist here..."></textarea>
+    <div class="controls">
+      <button id="compress" class="primary">Compress → Update compressed text & URL</button>
+      <button id="decompress">Decompress compressed text → Playlist</button>
+      <button id="reset">Reset sample</button>
+      <div style="flex:1"></div>
+      <span class="small">URL parameter: <code>data</code> (URL-safe)</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <label for="compressed">Compressed text (editable)</label>
+    <textarea id="compressed" spellcheck="false" placeholder="Compressed text (URL-safe)"></textarea>
+    <div class="controls">
+      <button id="copyCompressed">Copy compressed</button>
+      <button id="copyPlaylist">Copy playlist</button>
+      <div style="flex:1"></div>
+      <span class="small">Use the Decompress button after editing compressed text to apply it to the playlist.</span>
+    </div>
+    <div id="message" class="error" style="display:none"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/lz-string/libs/lz-string.min.js"></script>
+  <script>
+    // Utilities
+    function qs(name) {
+      const params = new URLSearchParams(location.search);
+      return params.get(name);
+    }
+    function updateURLParam(key, val) {
+      const url = new URL(location.href);
+      if (val === null || val === "") {
+        url.searchParams.delete(key);
+      } else {
+        url.searchParams.set(key, val);
+      }
+      history.replaceState(null, '', url.toString());
+    }
+    function showMessage(text, isError=true) {
+      const el = document.getElementById('message');
+      if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+      el.style.display = 'block';
+      el.style.color = isError ? '#a00' : '#060';
+      el.textContent = text;
+    }
+
+    // Elements
+    const playlistEl = document.getElementById('playlist');
+    const compressedEl = document.getElementById('compressed');
+    const compressBtn = document.getElementById('compress');
+    const decompressBtn = document.getElementById('decompress');
+    const copyCompressedBtn = document.getElementById('copyCompressed');
+    const copyPlaylistBtn = document.getElementById('copyPlaylist');
+    const copyUrlBtn = document.getElementById('copyUrl');
+    const resetBtn = document.getElementById('reset');
+
+    // Sample JWPlayer-style playlist (JSON array)
+    const samplePlaylist = `[
+  {
+    "file": "https://example.com/video1.mp4",
+    "title": "Sample video 1",
+    "image": "https://example.com/thumb1.jpg"
+  },
+  {
+    "file": "https://example.com/video2.mp4",
+    "title": "Sample video 2",
+    "image": "https://example.com/thumb2.jpg"
+  }
+]`;
+
+    function decompressParamToPlaylist(paramVal) {
+      showMessage('');
+      if (!paramVal) return false;
+      try {
+        const decompressed = LZString.decompressFromEncodedURIComponent(paramVal);
+        if (decompressed === null) {
+          showMessage('Unable to decompress: input looks invalid.', true);
+          return false;
+        }
+        playlistEl.value = decompressed;
+        return true;
+      } catch (err) {
+        console.error(err);
+        showMessage('Decompression error: ' + err.message, true);
+        return false;
+      }
+    }
+
+    function compressPlaylistToFieldAndURL() {
+      showMessage('');
+      const text = playlistEl.value || '';
+      try {
+        const compressed = LZString.compressToEncodedURIComponent(text);
+        compressedEl.value = compressed;
+        updateURLParam('data', compressed);
+        showMessage('Compressed and updated URL (parameter data).', false);
+      } catch (err) {
+        console.error(err);
+        showMessage('Compression error: ' + err.message, true);
+      }
+    }
+
+    function decompressCompressedFieldToPlaylist() {
+      showMessage('');
+      const compressed = compressedEl.value || '';
+      if (!compressed) { showMessage('Compressed field is empty.', true); return; }
+      try {
+        const decompressed = LZString.decompressFromEncodedURIComponent(compressed);
+        if (decompressed === null) {
+          showMessage('Unable to decompress compressed text: invalid data.', true);
+          return;
+        }
+        playlistEl.value = decompressed;
+        updateURLParam('data', compressed);
+        showMessage('Decompressed and updated playlist from compressed text.', false);
+      } catch (err) {
+        console.error(err);
+        showMessage('Decompression error: ' + err.message, true);
+      }
+    }
+
+    // Copy helpers
+    async function copyToClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showMessage('Copied to clipboard.', false);
+      } catch (err) {
+        showMessage('Copy failed: ' + err.message, true);
+      }
+    }
+
+    // Event handlers
+    compressBtn.addEventListener('click', (e) => {
+      compressPlaylistToFieldAndURL();
+    });
+
+    decompressBtn.addEventListener('click', (e) => {
+      decompressCompressedFieldToPlaylist();
+    });
+
+    copyCompressedBtn.addEventListener('click', () => {
+      copyToClipboard(compressedEl.value || '');
+    });
+
+    copyPlaylistBtn.addEventListener('click', () => {
+      copyToClipboard(playlistEl.value || '');
+    });
+
+    copyUrlBtn.addEventListener('click', () => {
+      copyToClipboard(location.href);
+    });
+
+    resetBtn.addEventListener('click', () => {
+      playlistEl.value = samplePlaylist;
+      showMessage('Reset to sample playlist.', false);
+    });
+
+    // On load: if data param present, decompress and place into playlist and compressed field.
+    (function init() {
+      const dataParam = qs('data');
+      if (dataParam) {
+        const ok = decompressParamToPlaylist(dataParam);
+        compressedEl.value = dataParam;
+        if (!ok) {
+          // If decode failed, show sample in playlist but keep compressed.
+          playlistEl.value = samplePlaylist;
+        }
+      } else {
+        playlistEl.value = samplePlaylist;
+      }
+    })();
+
+    // Optional: debounce auto-compress while editing (commented out by default)
+    // let timer;
+    // playlistEl.addEventListener('input', () => {
+    //   clearTimeout(timer);
+    //   timer = setTimeout(() => compressPlaylistToFieldAndURL(), 1200);
+    // });
+  </script>
+</body>
+</html>
